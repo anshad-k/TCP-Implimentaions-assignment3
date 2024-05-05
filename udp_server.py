@@ -173,6 +173,7 @@ class UDPServer:
         while True:
             pkt, address = self.__sock.recvfrom(1024)
             ack, _ = packet.extract(pkt)
+            ack += 1
             if address != client_address:
                 continue
             if ack > self.base:
