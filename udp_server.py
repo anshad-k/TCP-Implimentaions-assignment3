@@ -144,8 +144,3 @@ class UDPServer:
           self.__sock.close()
         if self.file is not None:
           self.file.close()
-
-if __name__ == "__main__":
-    # server = UDPServer()
-    # server.run()
-    pass
