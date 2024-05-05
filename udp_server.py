@@ -2,7 +2,6 @@ import socket
 import sys
 import time
 import _thread
-import udt
 from timer import Timer
 import packet
 
@@ -63,7 +62,7 @@ class UDPServer:
 
         while self.current_packet < num_packets:
             self.mutex.acquire()
-            udt.send(packets[self.current_packet], self.__sock, client_address)
+            self.__sock.sendto(packets[self.current_packet], client_address)
             print("Sent packet", self.current_packet)
             self.timer.stop()
             self.timer.start()
@@ -76,12 +75,12 @@ class UDPServer:
                     break
                 self.mutex.release()
             self.mutex.release()
-        udt.send(packet.make_empty(), self.__sock, client_address)
+        self.__sock.sendto(packet.make_empty(), client_address)
         print("File sent")
     
     def __SW_receive(self, client_address):
         while True:
-            pkt, address = udt.recv(self.__sock)
+            pkt, address = self.__sock.recvfrom(1024)
             ack, _ = packet.extract(pkt)
             if address != client_address:
                 continue
@@ -104,7 +103,7 @@ class UDPServer:
             while next_to_send < self.base + self.window_size:
                 if next_to_send >= num_packets:
                     break
-                udt.send(packets[next_to_send], self.__sock, client_address)
+                self.__sock.sendto(packets[next_to_send], client_address)
                 print("Sent packet", next_to_send)
                 next_to_send += 1
             
@@ -121,11 +120,11 @@ class UDPServer:
                 self.timer.stop()
                 next_to_send = self.base
             self.mutex.release()
-        udt.send(packet.make_empty(), self.__sock, client_address)
+        self.__sock.sendto(packet.make_empty(), client_address)
 
     def __GBN_receive(self, client_address):
         while True:
-            pkt, address = udt.recv(self.__sock)
+            pkt, address = self.__sock.recvfrom(1024)
             ack, _ = packet.extract(pkt)
             if address != client_address:
                 continue
