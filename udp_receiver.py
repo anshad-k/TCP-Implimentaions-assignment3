@@ -6,6 +6,8 @@ import time
 import os
 import seaborn as sns
 import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
 
 SERVER_ADDR = ('127.0.0.1', 5000)
 RECEIVER_ADDR = ('127.0.0.1', 8081)
@@ -13,14 +15,8 @@ MAX_PACKETS = 4096
 BUFFER_SIZE = 26 * 1024
 
 # Receive packets from the sender
-def receive(sock, filename):
+def receive(sock, file):
     # Open the file for writing
-    try:
-        file = open(filename, 'wb')
-    except IOError:
-        print('Unable to open', filename)
-        return
-    
     expected_num = 0
     received_packets = [False] * MAX_PACKETS
     sock.sendto(b"SYN", SERVER_ADDR)
@@ -58,14 +54,24 @@ def receive(sock, filename):
 
 # Main function
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print('Expected filename as command line argument')
+    if len(sys.argv) != 4:
+        print('Expected interface, download file name and tcp algorithm as command line argument')
+        print('tcp algorithm numbers:\n 0: stop and wait,\n 1: go back n,\n 2: selective repeat')
         exit()
         
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(RECEIVER_ADDR) 
+    print('Receiver listening on', RECEIVER_ADDR)
+
+    plot_filenames = ["Stop_and_Wait.png", "Go_Back_n.png", "Selective_Repeat.png"]
+
     filename = sys.argv[2]
     interface = sys.argv[1]
+    tcp_algorithm = int(sys.argv[3])
+
+    if tcp_algorithm < 0 or tcp_algorithm > 2:
+        print('Invalid TCP algorithm')
+        exit()
 
     bandwidth = 100 * 1024 * 8 / 1000 #100 KBps to kbps
     packet_size = 25 * 1024 #25 KB
@@ -75,24 +81,50 @@ if __name__ == '__main__':
     
     print("Changing bandwidth to %s kbps" % bandwidth)
     try:
-        os.system("sudo tc qdisc add dev %s root netem rate %skbit" % (interface, bandwidth))
+        os.system("sudo tc qdisc add dev %s ingress netem rate %skbit" % (interface, bandwidth))
     except:
-        os.system("sudo tc qdisc del dev %s root" % (interface))
-        os.system("sudo tc qdisc add dev %s root netem rate %skbit" % (interface, bandwidth))
+        os.system("sudo tc qdisc del dev %s ingress" % (interface))
+        os.system("sudo tc qdisc add dev %s ingress netem rate %skbit" % (interface, bandwidth))
     
-    download_times_sw = np.random.rand(6, 6) 
+    download_times = np.random.rand(6, 6) 
     for i, loss in enumerate(losses):
         for j, delay in enumerate(delays):
             print("Setting loss to %s%% and delay to %s ms" % (loss, delay))
-            os.system("sudo tc qdisc change dev %s root netem loss %s%% delay %sms %sms distribution normal" % (interface, loss, delay, delay_deviation))
+            os.system("sudo tc qdisc change dev %s ingress netem delay %sms %sms distribution normal" % (interface, delay, delay_deviation))
+            os.system("sudo tc qdisc change dev %s ingress netem loss %s%%" % (interface, loss))
+            try:
+                file = open(filename, 'wb')
+            except IOError:
+                print('Unable to open', filename)
+                exit()
             start_time = time.time()
-            receive(sock, filename)
+            receive(sock, file)
             end_time = time.time()
-            download_times_sw[i][j] = end_time - start_time
-    # start_time = time.time()
-    # receive(sock, filename)
-    # end_time = time.time()
-    # print('Time taken: %s ms' % (end_time - start_time))
+            download_times[i][j] = (end_time - start_time) * 1000 # in ms
+    
+    # Plotting heatmaps
+    fig, axes = plt.subplots(1, 1, figsize=(15, 5))  # Create subplots for each protocol
+
+    # Plot heatmap for SW protocol
+    sns.heatmap(download_times, cmap='viridis', ax=axes)
+    axes.set_title(plot_filenames[tcp_algorithm][:-4] + " Protocol")
+
+    cbar = axes.collections[0].colorbar
+    cbar.ax.set_ylabel('Download time (ms)')
+    
+    plt.xlabel("Loss (%)")
+    plt.ylabel("Delay (ms)")
+    plt.xticks(np.arange(len(losses)), losses)
+    plt.yticks(np.arange(len(delays)), delays)
+
+    plt.tight_layout()
+    plt.savefig(plot_filenames[tcp_algorithm])
+
+    print("result:  ")
+    df = pd.DataFrame(download_times, columns=losses, index=delays)
+    print(df)
+    df.to_csv(plot_filenames[tcp_algorithm][:-4] + ".csv")
+
     print("resetting the interface")
-    os.system("sudo tc qdisc del dev %s root" % (interface))
+    os.system("sudo tc qdisc del dev %s ingress" % (interface))
     sock.close()

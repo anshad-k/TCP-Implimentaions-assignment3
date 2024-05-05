@@ -57,7 +57,7 @@ class UDPServer:
         num_packets = len(packets)
         self.base = 0
 
-        receive_thread = _thread.start_new_thread(self.__SW_receive, (client_address, num_packets,))
+        _thread.start_new_thread(self.__SW_receive, (client_address, num_packets,))
 
         while self.base < num_packets:
             self.mutex.acquire()
@@ -66,12 +66,12 @@ class UDPServer:
             
             if not self.timer.running():
                 self.timer.start()
-            
-            while self.timer.running() and not self.timer.timeout():
-                self.mutex.release()
-                time.sleep(UDPServer.SLEEP_INTERVAL)
-                self.mutex.acquire()
             self.mutex.release()
+
+            while self.timer.running() and not self.timer.timeout():
+                self.mutex.acquire()
+                time.sleep(UDPServer.SLEEP_INTERVAL)
+                self.mutex.release()
         self.__sock.sendto(packet.make_empty(), client_address)
         print("File sent")
         return
@@ -79,6 +79,7 @@ class UDPServer:
     def __SW_receive(self, client_address, num_packets):
         while True:
             if self.base >= num_packets:
+                self.timer.stop()
                 return
             pkt, address = self.__sock.recvfrom(1024)
             ack, _ = packet.extract(pkt)
@@ -129,6 +130,7 @@ class UDPServer:
     def __GBN_receive(self, client_address, num_packets):
         while True:
             if self.base >= num_packets:
+                self.timer.stop()
                 return
             pkt, address = self.__sock.recvfrom(1024)
             ack, _ = packet.extract(pkt)
@@ -180,6 +182,7 @@ class UDPServer:
     def __SR_receive(self, client_address, packets):
         while True:
             if self.base >= len(packets):
+                self.timer.stop()
                 return
             pkt, address = self.__sock.recvfrom(1024)
             ack, _ = packet.extract(pkt)
@@ -210,11 +213,15 @@ class UDPServer:
           self.file.close()
 
 if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print('Expected tcp algorithm as command line argument')
+        print('tcp algorithm numbers:\n 0: stop and wait,\n 1: go back n,\n 2: selective repeat')
+        exit()
     file_name = "./loco.jpg"
-    packet_size = 25 * 1024
-    window_size = 7
-    RTO = 0.2
-    tcp_algorithm = UDPServer.SR
+    packet_size = 25 * 1024 # 25 KB
+    window_size = 7  # 7 packets (betwenn 5 and 10)
+    RTO = 0.2 # 200 ms
+    tcp_algorithm = int(sys.argv[1])
     server = UDPServer(file_name, packet_size, window_size, RTO)
     server.run(tcp_algorithm)
     
