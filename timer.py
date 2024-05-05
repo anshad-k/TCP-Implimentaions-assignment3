@@ -26,4 +26,4 @@ class Timer(object):
         if not self.running():
             return False
         else:
-            return time.time() - self._start_time >= self._duration
+            return (time.time() - self._start_time) >= self._duration
