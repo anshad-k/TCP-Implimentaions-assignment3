@@ -9,7 +9,7 @@ class UDPServer:
     SW = 0
     GBN = 1
     SR = 2
-    SLEEP_INTERVAL = 0.05
+    SLEEP_INTERVAL = 0.01
     def __init__(self, file_name, packet_size, window_size, RTO, port=5000):
         self.port = port
         self.file = open(file_name, "rb")
@@ -56,22 +56,22 @@ class UDPServer:
                 print("Invalid TCP algorithm")
     def __stop_and_wait(self, client_address, packets):
         num_packets = len(packets)
-        self.current_packet = 0
+        self.base = 0
 
         _thread.start_new_thread(self.__SW_receive, (client_address))
 
-        while self.current_packet < num_packets:
+        while self.base < num_packets:
             self.mutex.acquire()
-            self.__sock.sendto(packets[self.current_packet], client_address)
-            print("Sent packet", self.current_packet)
+            self.__sock.sendto(packets[self.base], client_address)
+            print("Sent packet", self.base)
             self.timer.stop()
             self.timer.start()
-            sent_packet = self.current_packet
+            sent_packet = self.base
             self.mutex.release()
 
             while not self.timer.timeout():
                 self.mutex.acquire()
-                if self.current_packet > sent_packet:
+                if self.base > sent_packet:
                     break
                 self.mutex.release()
             self.mutex.release()
@@ -84,10 +84,10 @@ class UDPServer:
             ack, _ = packet.extract(pkt)
             if address != client_address:
                 continue
-            if ack == self.current_packet:
+            if ack == self.base:
                 self.mutex.acquire()
                 print("Received ACK", ack)
-                self.current_packet += 1
+                self.base += 1
                 self.mutex.release()
 
 
@@ -137,7 +137,57 @@ class UDPServer:
 
 
     def __selective_repeat(self, client_address, packets):
-        pass
+        num_packets = len(packets)
+        self.base = 0
+        next_to_send = 0
+        self.acked_packets = [False] * (num_packets + 1)
+
+        _thread.start_new_thread(self.__SR_receive, (client_address, packets))
+
+        while self.base < num_packets:
+            self.mutex.acquire()
+            while next_to_send < self.base + self.window_size:
+                if next_to_send >= num_packets:
+                    break
+                self.__sock.sendto(packets[next_to_send], client_address)
+                print("Sent packet ", next_to_send)
+                next_to_send += 1
+
+            if not self.timer.running():
+                self.timer.start()
+            self.mutex.release()
+
+            while self.timer.running() and not self.timer.timeout():
+                self.mutex.acquire()
+                time.sleep(UDPServer.SLEEP_INTERVAL)
+                self.mutex.release()
+
+            if self.timer.timeout():
+                print("Timeout, sequence number = ", self.base)
+                self.timer.stop()
+                next_to_send = self.base
+            self.mutex.release()
+        self.__sock.sendto(packet.make_empty(), client_address)
+
+    def __SR_receive(self, client_address, packets):
+        while True:
+            pkt, address = self.__sock.recvfrom(1024)
+            ack, _ = packet.extract(pkt)
+            if address != client_address:
+                continue
+            if ack > self.base:
+                self.mutex.acquire()
+                print("Received ACK", ack)
+                self.base = ack
+                if self.acked_packets[ack] == True:
+                    self.__sock.sendto(packets[ack], client_address)
+                    print("Sent packet", ack)
+                    self.timer.stop()
+                    self.timer.start()
+                else:
+                    self.acked_packets[ack] = True
+                    self.timer.stop()
+                self.mutex.release()
 
     def __del__(self):
         if self.__sock is not None:
